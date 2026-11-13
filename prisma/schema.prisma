@@ -59,7 +59,7 @@ model Product{
   updatedAt DateTime @default (now()) @updatedAt
   images ProductImage[]
   metaData ProductMetaData[]
-  category Category? @relation(fields: [categoryId], references: [id])
+  category Category @relation(fields: [categoryId], references: [id])
   orders orderProduct[]
 }
 

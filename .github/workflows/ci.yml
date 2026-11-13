@@ -1,0 +1,93 @@
+name: Store API - Docker, Prisma e PostgreSQL
+
+on:
+  push:
+    branches:
+      - main
+      - atividade/docker-github-actions
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  testar-api-e-migrations:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: store_ci
+          POSTGRES_PASSWORD: ci_only_password
+          POSTGRES_DB: store_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U store_ci -d store_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://store_ci:ci_only_password@localhost:5432/store_ci?schema=public
+      PORT: ${{ vars.PORT || '4000' }}
+      BASE_URL: ${{ vars.BASE_URL || 'http://localhost:4000' }}
+      FRONTEND_URL: ${{ vars.FRONTEND_URL || 'http://localhost:3000' }}
+      # Chaves falsas: nenhuma cobranca Stripe acontece durante o teste.
+      STRIPE_KEY: sk_test_ci_placeholder_not_real
+      STRIPE_WEBHOOK_SECRET_KEY: whsec_ci_placeholder_not_real
+    steps:
+      - name: Baixar o codigo
+        uses: actions/checkout@v4
+
+      - name: Instalar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Gerar Prisma Client
+        run: npm run generate
+
+      - name: Validar Prisma schema
+        run: npx prisma validate
+
+      - name: Compilar TypeScript
+        run: npm run build
+
+      - name: Executar migration no PostgreSQL temporario
+        run: npm run migrate:deploy
+
+      - name: Verificar status das migrations
+        run: npm run migrate:status
+
+      - name: Inserir dados de exemplo (seed)
+        run: npm run seed
+
+      - name: Testar tabelas, colunas, chaves, indices e dados
+        run: npm run verify:db
+
+      - name: Construir imagem Docker da API
+        run: docker build -t store-api:ci .
+
+      - name: Rodar container Docker e testar endpoints
+        run: |
+          docker run -d --name store-api-ci --network host \
+            -e DATABASE_URL="$DATABASE_URL" \
+            -e PORT="$PORT" \
+            -e BASE_URL="$BASE_URL" \
+            -e FRONTEND_URL="$FRONTEND_URL" \
+            -e STRIPE_KEY="$STRIPE_KEY" \
+            -e STRIPE_WEBHOOK_SECRET_KEY="$STRIPE_WEBHOOK_SECRET_KEY" \
+            store-api:ci
+          npm run smoke:test
+
+      - name: Registrar logs do Docker
+        if: always()
+        run: |
+          docker logs store-api-ci 2>/dev/null || true
+          docker rm -f store-api-ci 2>/dev/null || true
