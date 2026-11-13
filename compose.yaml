@@ -1,0 +1,35 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-store}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-store_local_password}
+      POSTGRES_DB: ${POSTGRES_DB:-store}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build: .
+    image: store-api:local
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-store}:${POSTGRES_PASSWORD:-store_local_password}@db:5432/${POSTGRES_DB:-store}?schema=public
+      PORT: "4000"
+      BASE_URL: ${BASE_URL:-http://localhost:4000}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+      STRIPE_KEY: ${STRIPE_KEY:-sk_test_placeholder_not_real}
+      STRIPE_WEBHOOK_SECRET_KEY: ${STRIPE_WEBHOOK_SECRET_KEY:-whsec_placeholder_not_real}
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
